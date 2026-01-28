@@ -414,7 +414,7 @@ def calculate_ap_ar(pred_points_list, gt_points_list, distance_thresh=5.0, num_r
     return ap, ar
 
 
-def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0):
+def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0, vis_dir=None, image_id=None):
     """
     主函数：输入预测密度图和GT点信息，计算F1、AP、AR
 
@@ -422,44 +422,56 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
         pred_density_map (torch.Tensor): 预测的密度图 (H, W)
         gt_points (torch.Tensor/np.ndarray): 真实点坐标 (M, 2) [x, y]
         distance_thresh (float): 匹配距离阈值
+        vis_dir (str, optional): 可视化图像保存目录，如果为None则跳过可视化
+        image_id (str, optional): 图像ID，用于生成可视化文件名
 
     返回:
-        tuple: (f1, ap, ar, precision, recall)
+        tuple: (f1, precision, recall)
     """
-    # ==================== 新增：可视化GT点 ====================
-    gt_vis_path = f"/ZHANGyong/wjj/SAM-Free/tmp/gt_points.png"
-    visualize_points_on_density(
-        pred_density_map,
-        gt_points,
-        gt_vis_path,
-        title=f"GT Points (Count: {len(gt_points)})",
-        color=(0, 0, 255),  # GT点用红色
-        radius=2
-    )
-
     # 1. 从密度图提取预测点
     pred_points = get_pred_points_from_density(pred_density_map)
 
-    # ==================== 新增：可视化预测点 ====================
-    pred_vis_path = f"/ZHANGyong/wjj/SAM-Free/tmp/pred_points.png"
-    visualize_points_on_density(
-        pred_density_map,
-        pred_points,
-        pred_vis_path,
-        title=f"Pred Points (Count: {len(pred_points)})",
-        color=(0, 255, 0),  # 预测点用绿色
-        radius=2
-    )
-
     # 2. 转换GT点格式为numpy数组
     if isinstance(gt_points, torch.Tensor):
-        gt_points = gt_points.cpu().numpy()
+        gt_points_np = gt_points.cpu().numpy()
+    else:
+        gt_points_np = np.asarray(gt_points)
 
-    # 3. 单样本匹配（计算AP/AR需要多个样本，这里先返回单样本指标，批量调用需外层封装）
-    tp, fp, fn = match_points(pred_points, gt_points, distance_thresh)
+    # 3. 可视化（如果指定了保存目录）
+    if vis_dir is not None:
+        os.makedirs(vis_dir, exist_ok=True)
+        # 生成安全的文件名
+        if image_id is not None:
+            fname_base = os.path.splitext(os.path.basename(str(image_id)))[0]
+            fname_safe = fname_base.replace("/", "_").replace("\\", "_")
+        else:
+            fname_safe = "unknown"
+        
+        # 可视化GT点（红色）
+        gt_vis_path = os.path.join(vis_dir, f"{fname_safe}_gt_points.png")
+        visualize_points_on_density(
+            pred_density_map,
+            gt_points_np,
+            gt_vis_path,
+            title=f"GT Points (Count: {len(gt_points_np)})",
+            color=(0, 0, 255),  # GT点用红色 (BGR)
+            radius=2
+        )
+
+        # 可视化预测点（绿色）
+        pred_vis_path = os.path.join(vis_dir, f"{fname_safe}_pred_points.png")
+        visualize_points_on_density(
+            pred_density_map,
+            pred_points,
+            pred_vis_path,
+            title=f"Pred Points (Count: {len(pred_points)})",
+            color=(0, 255, 0),  # 预测点用绿色 (BGR)
+            radius=2
+        )
+
+    # 4. 单样本匹配（计算AP/AR需要多个样本，这里先返回单样本指标，批量调用需外层封装）
+    tp, fp, fn = match_points(pred_points, gt_points_np, distance_thresh)
     precision, recall, f1 = calculate_precision_recall_f1(tp, fp, fn)
-
-
 
     return f1, precision, recall
 

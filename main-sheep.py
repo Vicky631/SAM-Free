@@ -7,13 +7,15 @@ from typing import List, Optional
 
 import numpy as np
 import cv2
+import torch
+from scipy.ndimage import gaussian_filter
 from tqdm import tqdm
 
 from shi_segment_anything import sam_model_registry
 from shi_segment_anything.automatic_mask_generator import SamAutomaticMaskGenerator
 
 from myutil.SheepOBB import SheepOBBDatasetLoader
-from myutil.localization import match_points, calculate_precision_recall_f1
+from myutil.localization import evaluate_detection_metrics
 
 
 def _ensure_dir(path: str) -> None:
@@ -70,6 +72,40 @@ def _select_prompt_indices(
     raise ValueError(f"Unknown prompt_select: {mode}")
 
 
+def points_to_density_map(pred_points, image, sigma=4):
+    """
+    将参考点坐标转换为密度图（参考 main-fsc147.py）
+    Args:
+        pred_points: 参考点列表，格式为[[x1,y1], [x2,y2], ...]
+        image: 输入图像（ndarray），用于获取尺寸 (H, W, C)
+        sigma: 高斯核的标准差，控制点的扩散范围（默认4，可根据图像尺寸调整）
+    Returns:
+        pred_density_map: 预测密度图 (torch.Tensor, 形状 (H, W))
+    """
+    # 1. 获取图像的高度H和宽度W
+    H, W = image.shape[0], image.shape[1]  # image是ndarray，形状是(H, W, 3)
+
+    # 2. 初始化密度图（全零，numpy数组）
+    density_map = np.zeros((H, W), dtype=np.float32)
+
+    # 3. 遍历每个参考点，在对应位置添加1（离散点）
+    for (x, y) in pred_points:
+        # 确保坐标在图像范围内（防止越界）
+        x = np.clip(x, 0, W - 1)
+        y = np.clip(y, 0, H - 1)
+        # 转换为整数坐标（像素是离散的）
+        x_int, y_int = int(np.round(x)), int(np.round(y))
+        density_map[y_int, x_int] += 1  # 注意：图像的y是行，x是列
+
+    # 4. 对离散点进行高斯滤波，生成连续的密度图
+    density_map = gaussian_filter(density_map, sigma=sigma)
+
+    # 5. 转换为torch.Tensor（形状 (H, W)）
+    pred_density_map = torch.from_numpy(density_map)
+
+    return pred_density_map
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Sheep OBB counting/localization with SAM (training-free)")
     parser.add_argument("--image_dir", type=str, default="/ZHANGyong/wjj/dataset/Sheep_obb/img/", help="图像目录")
@@ -89,6 +125,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=0, help="随机种子（prompt_select=random时生效）")
 
     parser.add_argument("--distance_thresh", type=float, default=10.0, help="定位匹配距离阈值（像素）")
+    parser.add_argument("--save_vis", action="store_true", help="是否保存可视化图像（预测点与GT点）")
+    parser.add_argument("--vis_sigma", type=float, default=4.0, help="密度图高斯滤波的sigma值")
     return parser.parse_args()
 
 
@@ -100,6 +138,9 @@ if __name__ == "__main__":
     _ensure_dir(join(args.output_dir, "logs"))
     _ensure_dir(join(args.output_dir, args.split_tag))
     _ensure_dir(join(args.output_dir, args.split_tag, args.prompt_type))
+    if args.save_vis:
+        vis_dir = join(args.output_dir, args.split_tag, args.prompt_type, "visualizations")
+        _ensure_dir(vis_dir)
 
     log_path = join(args.output_dir, "logs", f"log-{args.split_tag}-{args.prompt_type}.csv")
     log_f = open(log_path, "w", encoding="utf-8")
@@ -180,16 +221,31 @@ if __name__ == "__main__":
         NAE += rel_err
         SRE += (err ** 2) / gt_cnt if gt_cnt > 0 else 0.0
 
-        # 定位指标：直接对 SAM 输出的 point_coords 与 GT centers 做匹配
+        # 定位指标：提取预测点并生成密度图（用于可视化与评估）
         pred_points = []
         for m in masks:
             pc = m.get("point_coords", None)
             if pc is None or len(pc) == 0:
                 continue
-            pred_points.append(pc[0])  # [x,y]
-        pred_points = np.asarray(pred_points, dtype=np.float32)
-        tp, fp, fn = match_points(pred_points, centers, distance_thresh=float(args.distance_thresh))
-        precision, recall, f1 = calculate_precision_recall_f1(tp, fp, fn)
+            # 兼容不同格式：可能是 [x,y] 或 [[x,y]]
+            if isinstance(pc[0], (list, tuple, np.ndarray)):
+                pred_points.append(pc[0])
+            else:
+                pred_points.append(pc)
+        pred_points = np.asarray(pred_points, dtype=np.float32) if len(pred_points) > 0 else np.array([], dtype=np.float32).reshape(0, 2)
+        
+        # 生成密度图（用于可视化与评估）
+        pred_density_map = points_to_density_map(pred_points, image, sigma=args.vis_sigma)
+        
+        # 计算定位指标（使用密度图方式，与 FSC147 保持一致）
+        # 如果启用可视化，evaluate_detection_metrics 会自动保存可视化图像
+        f1, precision, recall = evaluate_detection_metrics(
+            pred_density_map=pred_density_map,
+            gt_points=centers,
+            distance_thresh=args.distance_thresh,
+            vis_dir=vis_dir if args.save_vis else None,
+            image_id=fname
+        )
         total_f1 += f1
         total_precision += precision
         total_recall += recall
