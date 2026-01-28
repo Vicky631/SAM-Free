@@ -1,0 +1,1 @@
+python main-sheep.py --image_dir "你的图片目录" --annotation_dir "你的DOTA标注目录" --prompt_type box --prompt_box_num 3 --device cuda:0
