@@ -26,7 +26,7 @@ from myutil.FSC_147 import FSC147DatasetLoader
 from myutil.localization import evaluate_detection_metrics
 
 parser = argparse.ArgumentParser(description="Counting with SAM")
-parser.add_argument("-dp", "--data_path", type=str, default='/data/wjj/dataset/FSC_147/',
+parser.add_argument("-dp", "--data_path", type=str, default='/ZHANGyong/wjj/dataset/FSC_147/',
                     help="Path to the FSC147 dataset")
 parser.add_argument("-o", "--output_dir", type=str, default="./logsSave/FSC147", help="/Path/to/output/logs/")
 parser.add_argument("-ts", "--test-split", type=str, default='test', choices=["train", "test", "val"],
@@ -111,11 +111,11 @@ if __name__ == "__main__":
             strings = cline.strip().split('\t')
             class_dict[strings[0]] = strings[1]
 
-        clip_model, _ = clip.load("/data/wjj/online_model/clip/ViT-B-16.pt", device=args.device)
+        clip_model, _ = clip.load("/ZHANGyong/wjj/online_model/clip/ViT-B-16.pt", device=args.device)
         # clip_model, _ = clip.load("CS-ViT-B/16", device=args.device)
         clip_model.eval()
 
-    sam_checkpoint = "/data/wjj/online_model/sam/sam_vit_b_01ec64.pth"
+    sam_checkpoint = "/ZHANGyong/wjj/online_model/sam/sam_vit_b_01ec64.pth"
     model_type = "vit_b"
     sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
     sam.to(device=args.device)
@@ -140,9 +140,9 @@ if __name__ == "__main__":
     EVAL_CFG = {
         "distance_thresh": 10.0,  # 定位匹配距离阈值
         "dsizensity_map_size": (512, 512),  # 密度图固定尺寸
-        "annotation_path": '/data/wjj/dataset/FSC_147/annotation_FSC147_384_with_gt.json',
-        "image_root_path": '/data/wjj/dataset/FSC_147/images_384_VarV2',
-        "csv_save_dir": "/data/wjj/BMNet/experiments/FSC147/eval_csv"  # CSV保存目录
+        "annotation_path": '/ZHANGyong/wjj/dataset/FSC_147/annotation_FSC147_384_with_gt.json',
+        "image_root_path": '/ZHANGyong/wjj/dataset/FSC_147/images_384_VarV2',
+        "csv_save_dir": "/ZHANGyong/wjj/BMNet/experiments/FSC147/eval_csv"  # CSV保存目录
     }
 
     FSC_loader = FSC147DatasetLoader(

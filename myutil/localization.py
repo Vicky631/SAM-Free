@@ -427,7 +427,7 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
         tuple: (f1, ap, ar, precision, recall)
     """
     # ==================== 新增：可视化GT点 ====================
-    gt_vis_path = f"/data/wjj/SAM-Free/tmp/gt_points.png"
+    gt_vis_path = f"/ZHANGyong/wjj/SAM-Free/tmp/gt_points.png"
     visualize_points_on_density(
         pred_density_map,
         gt_points,
@@ -441,7 +441,7 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
     pred_points = get_pred_points_from_density(pred_density_map)
 
     # ==================== 新增：可视化预测点 ====================
-    pred_vis_path = f"/data/wjj/SAM-Free/tmp/pred_points.png"
+    pred_vis_path = f"/ZHANGyong/wjj/SAM-Free/tmp/pred_points.png"
     visualize_points_on_density(
         pred_density_map,
         pred_points,

@@ -72,15 +72,15 @@ def _select_prompt_indices(
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Sheep OBB counting/localization with SAM (training-free)")
-    parser.add_argument("--image_dir", type=str, default="./dataset/Sheep_obb/img", help="图像目录")
-    parser.add_argument("--annotation_dir", type=str, default="./dataset/Sheep_obb/DOTA", help="DOTA格式OBB标注txt目录")
+    parser.add_argument("--image_dir", type=str, default="/ZHANGyong/wjj/dataset/Sheep_obb/img/", help="图像目录")
+    parser.add_argument("--annotation_dir", type=str, default="/ZHANGyong/wjj/dataset/Sheep_obb/DOTA/", help="DOTA格式OBB标注txt目录")
     parser.add_argument("--split_file", type=str, default="", help="可选：split txt，每行一个文件名")
     parser.add_argument("--split_tag", type=str, default="test", help="仅用于输出目录/日志标识")
 
     parser.add_argument("--output_dir", type=str, default="./logsSave/Sheep", help="输出目录")
     parser.add_argument("--device", type=str, default="cuda:0", help="设备，如 cuda:0 / cpu")
 
-    parser.add_argument("--sam_checkpoint", type=str, default="./pretrain/sam_vit_b_01ec64.pth", help="SAM权重路径")
+    parser.add_argument("--sam_checkpoint", type=str, default="/ZHANGyong/wjj/online_models/sam/sam_vit_b_01ec64.pth", help="SAM权重路径")
     parser.add_argument("--model_type", type=str, default="vit_b", help="sam_model_registry key，如 vit_b")
 
     parser.add_argument("--prompt_type", type=str, default="box", choices=["box", "point"], help="prompt类型")
