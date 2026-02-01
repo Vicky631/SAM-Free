@@ -1,0 +1,27 @@
+# Python项目通用.gitignore
+
+# 编译后的字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境
+venv/
+env/
+.env/
+.venv/
+
+# IDE配置文件
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 依赖包
+*.egg-info/
+dist/
+build/
+*.whl
+
+# 日志文件
+*.log

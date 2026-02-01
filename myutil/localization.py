@@ -454,7 +454,7 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
             gt_points_np,
             gt_vis_path,
             title=f"GT Points (Count: {len(gt_points_np)})",
-            color=(0, 0, 255),  # GT点用红色 (BGR)
+            color=(0, 0, 130),  # GT点用红色 (BGR)
             radius=2
         )
 
@@ -465,8 +465,8 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
             pred_points,
             pred_vis_path,
             title=f"Pred Points (Count: {len(pred_points)})",
-            color=(0, 255, 0),  # 预测点用绿色 (BGR)
-            radius=2
+            color=(130, 130, 0),  # 预测点用绿色 (BGR)
+            radius=3
         )
 
     # 4. 单样本匹配（计算AP/AR需要多个样本，这里先返回单样本指标，批量调用需外层封装）
@@ -478,7 +478,7 @@ def evaluate_detection_metrics(pred_density_map, gt_points, distance_thresh=10.0
 
 def visualize_points_on_density(density_map, points, save_path, title, color=(0, 255, 0), radius=2):
     """
-    将点绘制在密度图上并保存
+    将点绘制在密度图上并保存（白底 + 黑边）
 
     参数:
         density_map (torch.Tensor): 预测密度图 (H, W)
@@ -497,12 +497,9 @@ def visualize_points_on_density(density_map, points, save_path, title, color=(0,
     else:
         density_np = density_map
 
-    # 归一化到0-255范围用于显示
-    density_normalized = (density_np - density_np.min()) / (density_np.max() - density_np.min() + 1e-8)
-    density_normalized = (density_normalized * 255).astype(np.uint8)
-
-    # 转换为彩色图像
-    density_rgb = cv2.cvtColor(density_normalized, cv2.COLOR_GRAY2BGR)
+    H, W = density_np.shape[:2]
+    # 白底：创建白色背景
+    density_rgb = np.ones((H, W, 3), dtype=np.uint8) * 255
 
     # 绘制点
     if points is not None and len(points) > 0:
@@ -528,10 +525,49 @@ def visualize_points_on_density(density_map, points, save_path, title, color=(0,
             if 0 <= x_int < density_rgb.shape[1] and 0 <= y_int < density_rgb.shape[0]:
                 cv2.circle(density_rgb, (x_int, y_int), radius, color, -1)
 
-    # 添加标题文本
+    # 添加黑色边框
+    h, w = density_rgb.shape[:2]
+    cv2.rectangle(density_rgb, (0, 0), (w - 1, h - 1), (0, 0, 0), 2)
+
+    # 添加标题文本（黑字，因背景为白）
     cv2.putText(density_rgb, title, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                1, (255, 255, 255), 2, cv2.LINE_AA)
+                1, (0, 0, 0), 2, cv2.LINE_AA)
 
     # 保存图像
     cv2.imwrite(save_path, density_rgb)
     print(f"可视化图像已保存至: {save_path}")
+
+
+def visualize_masks(image, masks, save_path, title="Masks", border_thickness=2):
+    """
+    将 SAM 预测的 masks 可视化并保存（白底 + 黑边）
+
+    参数:
+        image (np.ndarray): 原始图像 (H, W, 3)，用于获取尺寸（mask 为空时）
+        masks (list): SAM 返回的 mask 列表，每个元素包含 'segmentation' 键
+        save_path (str): 保存路径
+        title (str): 图像标题
+        border_thickness (int): 黑色边框粗细
+    """
+    if len(masks) == 0:
+        h, w = image.shape[:2]
+        vis_img = np.ones((h, w, 3), dtype=np.uint8) * 255
+    else:
+        h, w = masks[0]["segmentation"].shape[:2]
+        vis_img = np.ones((h, w, 3), dtype=np.uint8) * 255
+        sorted_masks = sorted(masks, key=lambda x: x["area"], reverse=True)
+        np.random.seed(42)
+        for m in sorted_masks:
+            seg = m["segmentation"]
+            if isinstance(seg, np.ndarray) and seg.ndim == 2:
+                color = [int(x) for x in np.random.randint(50, 255, 3)]  # BGR for cv2
+                for c in range(3):
+                    vis_img[:, :, c] = np.where(seg > 0, color[c], vis_img[:, :, c])
+
+    cv2.rectangle(vis_img, (0, 0), (w - 1, h - 1), (0, 0, 0), border_thickness)
+    cv2.putText(vis_img, f"{title} (Count: {len(masks)})", (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2, cv2.LINE_AA)
+
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    cv2.imwrite(save_path, vis_img)
+    print(f"Mask 可视化已保存至: {save_path}")

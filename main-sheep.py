@@ -15,7 +15,7 @@ from shi_segment_anything import sam_model_registry
 from shi_segment_anything.automatic_mask_generator import SamAutomaticMaskGenerator
 
 from myutil.SheepOBB import SheepOBBDatasetLoader
-from myutil.localization import evaluate_detection_metrics
+from myutil.localization import evaluate_detection_metrics, visualize_masks
 
 
 def _ensure_dir(path: str) -> None:
@@ -114,7 +114,7 @@ def parse_args():
     parser.add_argument("--split_tag", type=str, default="test", help="仅用于输出目录/日志标识")
 
     parser.add_argument("--output_dir", type=str, default="./logsSave/Sheep", help="输出目录")
-    parser.add_argument("--device", type=str, default="cuda:0", help="设备，如 cuda:0 / cpu")
+    parser.add_argument("--device", type=str, default="cuda:7", help="设备，如 cuda:0 / cpu")
 
     parser.add_argument("--sam_checkpoint", type=str, default="/ZHANGyong/wjj/online_models/sam/sam_vit_b_01ec64.pth", help="SAM权重路径")
     parser.add_argument("--model_type", type=str, default="vit_b", help="sam_model_registry key，如 vit_b")
@@ -246,6 +246,14 @@ if __name__ == "__main__":
             vis_dir=vis_dir if args.save_vis else None,
             image_id=fname
         )
+
+        # 可视化 masks（与 gt_points、pred_points 保存到同一目录）
+        if args.save_vis:
+            fname_base = os.path.splitext(os.path.basename(str(fname)))[0]
+            fname_safe = fname_base.replace("/", "_").replace("\\", "_")
+            mask_vis_path = join(vis_dir, f"{fname_safe}_masks.png")
+            visualize_masks(image, masks, mask_vis_path, title="Masks")
+
         total_f1 += f1
         total_precision += precision
         total_recall += recall
