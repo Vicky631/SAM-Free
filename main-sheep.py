@@ -2,6 +2,7 @@ import os
 import math
 import json
 import argparse
+from datetime import datetime
 from os.path import exists, join
 from typing import List, Optional
 
@@ -133,13 +134,23 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
+    # -------------------- 入参打印 --------------------
+    print("=" * 60)
+    print("项目入参 (Project Arguments)")
+    print("=" * 60)
+    for k, v in vars(args).items():
+        print(f"  {k}: {v}")
+    print("=" * 60)
+
     # -------------------- 输出目录 --------------------
     _ensure_dir(args.output_dir)
     _ensure_dir(join(args.output_dir, "logs"))
     _ensure_dir(join(args.output_dir, args.split_tag))
     _ensure_dir(join(args.output_dir, args.split_tag, args.prompt_type))
     if args.save_vis:
-        vis_dir = join(args.output_dir, args.split_tag, args.prompt_type, "visualizations")
+        now = datetime.now()
+        vis_suffix = f"vis_{now.month:02d}_{now.day:02d}_{now.hour:02d}_{now.minute:02d}"
+        vis_dir = join(args.output_dir, args.split_tag, args.prompt_type, vis_suffix)
         _ensure_dir(vis_dir)
 
     log_path = join(args.output_dir, "logs", f"log-{args.split_tag}-{args.prompt_type}.csv")
