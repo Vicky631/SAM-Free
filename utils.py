@@ -13,7 +13,7 @@ import scipy.spatial as T
 from scipy.ndimage.filters import gaussian_filter
 import clip
 from skimage.measure import label, find_contours
-from selective_search import selective_search
+# from selective_search import selective_search  # 临时注释掉，避免导入错误
 from shi_segment_anything import sam_model_registry, SamPredictor
 
 preprocess =  transforms.Compose([

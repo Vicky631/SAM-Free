@@ -1,0 +1,48 @@
+# CoNIC数据集配置
+device: cuda:5
+
+# 数据集配置
+dataset:
+  name: CoNIC
+  loader_class: CoNICDatasetLoader
+  data_dir: /ZHANGyong/wjj/dataset/CoNIC
+
+# 模型配置
+model:
+  sam_checkpoint: /ZHANGyong/wjj/online_models/sam/sam_vit_b_01ec64.pth
+  model_type: vit_b
+
+# 训练参数
+training:
+  prompt_type: box
+  prompt_box_num: 3
+  prompt_select: spatial
+  seed: 42
+
+# SAM参数
+sam_params:
+  points_per_side: 16
+  points_per_batch: 256
+  pred_iou_thresh: 0.7
+  stability_score_thresh: 0.7
+  use_ref_sim_filter: true
+  ref_sim_thresh: 0.3
+  verbose_point_stats: true
+
+# BMNet配置
+bmnet:
+  use_bmnet: false
+  bmnet_cfg: "/ZHANGyong/wjj/BMNet/config/test_bmnet+.yaml"
+  bmnet_checkpoint: "/ZHANGyong/wjj/BMNet/checkpoints/bmnet+_pretrained/model_best.pth"
+  bmnet_device: cuda:5
+
+# 评估配置
+evaluation:
+  distance_thresh: 3.0
+  vis_sigma: 2.0
+
+# 输出配置
+output:
+  base_dir: ./logsSave
+  split_tag: test
+  save_visualization: true

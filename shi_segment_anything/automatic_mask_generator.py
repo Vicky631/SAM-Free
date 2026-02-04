@@ -59,6 +59,8 @@ class SamAutomaticMaskGenerator:
         point_grids: Optional[List[np.ndarray]] = None,
         min_mask_region_area: int = 25,
         output_mode: str = "binary_mask",
+        use_ref_sim_for_filter: bool = False,
+        ref_sim_thresh: float = 0.3,
     ) -> None:
         """
         Using a SAM model, generates masks for the entire image.
@@ -138,14 +140,20 @@ class SamAutomaticMaskGenerator:
         self.crop_n_points_downscale_factor = crop_n_points_downscale_factor
         self.min_mask_region_area = min_mask_region_area
         self.output_mode = output_mode
+        self.use_ref_sim_for_filter = use_ref_sim_for_filter
+        self.ref_sim_thresh = ref_sim_thresh
 
     @torch.no_grad()
-    def generate(self, image: np.ndarray,ref_prompt) -> List[Dict[str, Any]]:
+    def generate(self, image: np.ndarray, ref_prompt, point_coords: Optional[np.ndarray] = None, verbose_point_stats: bool = False) -> List[Dict[str, Any]]:
         """
         Generates masks for the given image.
 
         Arguments:
           image (np.ndarray): The image to generate masks for, in HWC uint8 format.
+          ref_prompt: Exemplar box or point prompts (list / array).
+          point_coords (np.ndarray or None): Optional external candidate points (N, 2) in pixel [x, y].
+            If provided and non-empty, these replace the internal grid; otherwise use grid.
+          verbose_point_stats (bool): If True, print per-stage point/mask drop counts.
 
         Returns:
            list(dict(str, any)): A list over records for masks. Each record is
@@ -166,7 +174,7 @@ class SamAutomaticMaskGenerator:
         """
 
         # Generate masks
-        mask_data, mask_size = self._generate_masks(image,ref_prompt)
+        mask_data, mask_size = self._generate_masks(image, ref_prompt, point_coords=point_coords, verbose_point_stats=verbose_point_stats)
         mask_area = mask_size*mask_size
         self.min_mask_region_area = mask_area/4
 
@@ -272,8 +280,42 @@ class SamAutomaticMaskGenerator:
 
         return sim, target_embedding, mask_size
 
-    def _generate_masks(self, image: np.ndarray,ref_prompt) -> MaskData:
+    def _mask_ref_similarity(
+        self,
+        masks: torch.Tensor,
+        target_embedding: torch.Tensor,
+    ) -> Optional[torch.Tensor]:
+        """
+        计算每个预测 mask 与 ref（target_embedding）在图像特征空间上的余弦相似度。
+        masks: (N, H, W) 预测的 mask logits（原图分辨率）
+        target_embedding: (1, 1, C) ref 区域平均特征
+        返回: (N,) 每个 mask 与 ref 的相似度，范围约 [-1, 1]；失败时返回 None
+        """
+        try:
+            feat = self.predictor.get_image_embedding().squeeze(0)
+            C, h, w = feat.shape
+            device = feat.device
+            N = masks.shape[0]
+            masks = masks.float().to(device)
+            mask_small = F.interpolate(
+                masks.unsqueeze(1),
+                size=(h, w),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(1)
+            mask_sum = mask_small.sum(dim=(1, 2)).unsqueeze(1) + 1e-8  # (64,) -> (64, 1)
+            region_feat = (feat.unsqueeze(0) * mask_small.unsqueeze(1)).sum(dim=(2, 3)) / mask_sum
+            region_feat = region_feat / (region_feat.norm(dim=1, keepdim=True) + 1e-8)
+            ref_vec = target_embedding.squeeze().to(device)
+            ref_vec = ref_vec / (ref_vec.norm() + 1e-8)
+            sim = region_feat @ ref_vec
+            return sim
+        except Exception:
+            return None
+
+    def _generate_masks(self, image: np.ndarray, ref_prompt, point_coords: Optional[np.ndarray] = None, verbose_point_stats: bool = False) -> MaskData:
         orig_size = image.shape[:2]
+        H, W = orig_size[0], orig_size[1]
         self.predictor.set_image(image)
         sim, target_embedding, mask_size = self._generate_similarity(image, ref_prompt)
         target_size = self.predictor.transform.get_preprocess_shape(sim.shape[0], sim.shape[1], self.predictor.transform.target_length)
@@ -288,13 +330,26 @@ class SamAutomaticMaskGenerator:
         sim_map = cv2.convertScaleAbs(sim_map*255)
         th,sim_map = cv2.threshold(sim_map,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)#"""
 
-        points_per_side = (self.points_per_side//(1.2*mask_size)+1)*self.points_per_side
-        self.point_grids = build_point_grid(int(points_per_side))
-
-        # Get points for this crop
-        points_scale = np.array(orig_size)[None, ::-1]
-        points_for_image = self.point_grids * points_scale
+        # Optional external candidate points (e.g. from BMNet); otherwise use uniform grid
+        if point_coords is not None and len(point_coords) > 0:
+            points_for_image = np.asarray(point_coords).reshape(-1, 2).astype(np.float32)
+            points_for_image[:, 0] = np.clip(points_for_image[:, 0], 0, W - 1)
+            points_for_image[:, 1] = np.clip(points_for_image[:, 1], 0, H - 1)
+        else:
+            raw = (self.points_per_side//(1.2*mask_size)+1)*self.points_per_side
+            points_per_side = int(np.clip(raw, 64, 128))  # 下限64，上限128，防止过稀或爆炸
+            self.point_grids = build_point_grid(points_per_side)
+            points_scale = np.array(orig_size)[None, ::-1]
+            points_for_image = self.point_grids * points_scale
         point_mask = np.zeros(orig_size, dtype=bool)
+
+        # 各阶段计数（用于 verbose_point_stats）
+        n_input = len(points_for_image)
+        n_skipped_mask = 0
+        n_skipped_sim = 0
+        n_sent_sam = 0
+        n_after_iou = 0
+        n_after_stability = 0
 
         # Generate masks for this crop in batches
         data = MaskData()
@@ -307,13 +362,29 @@ class SamAutomaticMaskGenerator:
                 if not point_mask[point_i[1],point_i[0]]:
                     points_new.append(point_i)
 
+            n_in_batch = len(points)
+            n_after_mask = len(points_new)
+            if verbose_point_stats:
+                n_skipped_mask += (n_in_batch - n_after_mask)
+
             if len(points_new)>0:
-                batch_data, point_mask = self._process_batch(np.array(points_new), orig_size, sim_map, target_embedding, point_mask)
+                batch_data, point_mask, batch_stats = self._process_batch(
+                    np.array(points_new), orig_size, sim_map, target_embedding, point_mask,
+                    return_stats=verbose_point_stats,
+                )
+                if verbose_point_stats and batch_stats:
+                    if batch_stats.get("skipped_sim", 0) > 0:
+                        n_skipped_sim += batch_stats["skipped_sim"]
+                    else:
+                        n_sent_sam += batch_stats.get("sent_sam", 0)
+                        n_after_iou += batch_stats.get("after_iou", 0)
+                        n_after_stability += batch_stats.get("after_stability", 0)
                 if len(batch_data._stats)>0:
                     data.cat(batch_data)
                 del batch_data
 
-        self.predictor.reset_image()
+        n_before_nms = len(data["boxes"]) if len(data._stats) > 0 else 0
+        keep_by_nms = None
         if len(data._stats)>0:
             # Remove duplicates within this crop.
             keep_by_nms = batched_nms(
@@ -323,9 +394,42 @@ class SamAutomaticMaskGenerator:
                 iou_threshold=self.box_nms_thresh,
             )
             data.filter(keep_by_nms)
+        n_after_nms = len(keep_by_nms) if keep_by_nms is not None else 0
+
+        if verbose_point_stats:
+            self._log_point_stats(
+                n_input, n_skipped_mask, n_skipped_sim, n_sent_sam,
+                n_after_iou, n_after_stability, n_before_nms, n_after_nms,
+            )
 
         data.to_numpy()
         return data, mask_size
+
+    def _log_point_stats(
+        self,
+        n_input: int,
+        n_skipped_mask: int,
+        n_skipped_sim: int,
+        n_sent_sam: int,
+        n_after_iou: int,
+        n_after_stability: int,
+        n_before_nms: int,
+        n_after_nms: int,
+    ) -> None:
+        """打印各阶段点/ mask 数量，便于排查过滤情况。"""
+        print("[point_stats] 候选点各阶段数量:")
+        if self.use_ref_sim_for_filter:
+            print(f"  当前质量过滤: ref_sim_thresh={self.ref_sim_thresh} (与 ref 的相似度)")
+        else:
+            print(f"  当前质量过滤: pred_iou_thresh={self.pred_iou_thresh}, stability_score_thresh={self.stability_score_thresh}")
+        print(f"  1. 输入候选点:           {n_input}")
+        print(f"  2. 被 point_mask 剔除:    {n_skipped_mask}  (落在已分割区域)")
+        print(f"  3. 被相似度整批剔除:      {n_skipped_sim}  (sim_map 正样本 < 1/16)")
+        print(f"  4. 送入 SAM 的点:        {n_sent_sam}")
+        print(f"  5. IoU 过滤后 mask 数:   {n_after_iou}")
+        print(f"  6. 稳定性过滤后 mask 数: {n_after_stability}")
+        print(f"  7. NMS 前 mask 数:       {n_before_nms}")
+        print(f"  8. NMS 后 (最终) mask 数: {n_after_nms}")
 
     def _process_batch(
         self,
@@ -334,6 +438,7 @@ class SamAutomaticMaskGenerator:
         sim_map,
         target_embedding,
         point_mask,
+        return_stats: bool = False,
     ):
         # Run model on this batch
         transformed_points = self.predictor.transform.apply_coords(points, im_size).astype(int)
@@ -341,7 +446,8 @@ class SamAutomaticMaskGenerator:
         transformed_labels = sim_map[transformed_points[:,1],transformed_points[:,0]]
         # The batch would be passed if almost every points in the batch is negative
         if np.sum(transformed_labels)<(transformed_points.shape[0]/16):
-            return MaskData(), point_mask
+            stats = {"skipped_sim": len(points)} if return_stats else None
+            return MaskData(), point_mask, stats
         in_points = torch.as_tensor(transformed_points, device=self.predictor.device)
         in_labels = torch.as_tensor(transformed_labels, dtype=torch.int, device=in_points.device)
         
@@ -361,10 +467,25 @@ class SamAutomaticMaskGenerator:
         )
         del masks
 
-        # Filter by predicted IoU
-        if self.pred_iou_thresh > 0.0:
-            keep_mask = data["iou_preds"] > self.pred_iou_thresh
-            data.filter(keep_mask)
+        # 可选：用「与 ref 的相似度」替代 pred_iou 做过滤（更符合「留与 ref 同类」的目标）
+        if self.use_ref_sim_for_filter and target_embedding is not None:
+            ref_sim = self._mask_ref_similarity(data["masks"], target_embedding)
+            if ref_sim is not None:
+                data["iou_preds"] = ref_sim
+                # 用 ref_sim_thresh 过滤；相似度范围约 [-1,1]，阈值默认 0.3
+                if self.ref_sim_thresh > -1.0:
+                    keep_mask = data["iou_preds"] >= self.ref_sim_thresh
+                    data.filter(keep_mask)
+            else:
+                if self.pred_iou_thresh > 0.0:
+                    keep_mask = data["iou_preds"] > self.pred_iou_thresh
+                    data.filter(keep_mask)
+        else:
+            # Filter by predicted IoU
+            if self.pred_iou_thresh > 0.0:
+                keep_mask = data["iou_preds"] > self.pred_iou_thresh
+                data.filter(keep_mask)
+        n_after_iou = len(data["iou_preds"])
 
         # Calculate stability score 
         data["stability_score"] = calculate_stability_score(
@@ -374,6 +495,7 @@ class SamAutomaticMaskGenerator:
         if self.stability_score_thresh > 0.0:
             keep_mask = data["stability_score"] >= self.stability_score_thresh
             data.filter(keep_mask)
+        n_after_stability = len(data["stability_score"])
 
         # Threshold masks and calculate boxes
         data["masks"] = data["masks"] > self.predictor.model.mask_threshold
@@ -388,7 +510,12 @@ class SamAutomaticMaskGenerator:
 
         del data["masks"]
 
-        return data, point_mask
+        stats = (
+            {"sent_sam": len(points), "after_iou": n_after_iou, "after_stability": n_after_stability}
+            if return_stats
+            else None
+        )
+        return data, point_mask, stats
 
     @staticmethod
     def postprocess_small_regions(

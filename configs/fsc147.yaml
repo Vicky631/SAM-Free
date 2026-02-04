@@ -1,0 +1,46 @@
+# FSC147数据集配置文件
+dataset:
+  name: "FSC147"
+  type: "point_annotation"  # 点标注
+  annotation_file: "/ZHANGyong/wjj/dataset/FSC_147/annotation_FSC147_384_with_gt.json"
+  image_root: "/ZHANGyong/wjj/dataset/FSC_147/images_384_VarV2"
+  split_file: "/ZHANGyong/wjj/dataset/FSC_147/Train_Test_Val_FSC_147.json"
+  has_predefined_split: true
+  loader_class: "FSC147DatasetLoader"
+
+model:
+  sam_checkpoint: "/ZHANGyong/wjj/online_models/sam/sam_vit_b_01ec64.pth"
+  model_type: "vit_b"
+
+training:
+  prompt_type: "box"  # box, point, text
+  prompt_box_num: 3
+  prompt_select: "head"  # head, random
+  seed: 0
+
+# BMNet相关配置
+bmnet:
+  use_bmnet: false  # FSC147默认不使用BMNet
+  bmnet_cfg: "/ZHANGyong/wjj/BMNet/config/test_bmnet+.yaml"
+  bmnet_checkpoint: "/ZHANGyong/wjj/BMNet/checkpoints/bmnet+_pretrained/model_best.pth"
+  bmnet_device: ""
+
+# SAM参数配置
+sam_params:
+  points_per_side: 64
+  points_per_batch: 64
+  pred_iou_thresh: 0.88
+  stability_score_thresh: 0.85
+  use_ref_sim_filter: false
+  ref_sim_thresh: 0.3
+  verbose_point_stats: false
+
+evaluation:
+  metrics: ["MAE", "RMSE", "NAE", "SRE", "F1", "Precision", "Recall"]
+  distance_thresh: 10.0
+  vis_sigma: 4.0
+
+output:
+  base_dir: "./logsSave"
+  save_visualization: false
+  split_tag: "test"  # test, train, val

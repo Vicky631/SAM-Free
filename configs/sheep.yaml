@@ -1,0 +1,46 @@
+# Sheep数据集配置文件
+dataset:
+  name: "Sheep_OBB"
+  type: "obb_annotation"  # 旋转框标注
+  image_dir: "/ZHANGyong/wjj/dataset/Sheep_obb/img/"
+  annotation_dir: "/ZHANGyong/wjj/dataset/Sheep_obb/DOTA/"
+  split_file: ""  # 可选的split文件路径，空字符串表示使用全部数据
+  has_predefined_split: false
+  loader_class: "SheepOBBDatasetLoader"
+
+model:
+  sam_checkpoint: "/ZHANGyong/wjj/online_models/sam/sam_vit_b_01ec64.pth"
+  model_type: "vit_b"
+
+training:
+  prompt_type: "box"  # box, point
+  prompt_box_num: 3
+  prompt_select: "head"  # head, random
+  seed: 0
+
+# BMNet相关配置
+bmnet:
+  use_bmnet: true
+  bmnet_cfg: "/ZHANGyong/wjj/BMNet/config/test_bmnet+.yaml"
+  bmnet_checkpoint: "/ZHANGyong/wjj/BMNet/checkpoints/bmnet+_pretrained/model_best.pth"
+  bmnet_device: ""  # 空字符串表示使用与主模型相同的设备
+
+# SAM参数配置
+sam_params:
+  points_per_side: 64
+  points_per_batch: 64
+  pred_iou_thresh: 0.88
+  stability_score_thresh: 0.85
+  use_ref_sim_filter: false
+  ref_sim_thresh: 0.3
+  verbose_point_stats: false
+
+evaluation:
+  metrics: ["MAE", "RMSE", "NAE", "SRE", "F1", "Precision", "Recall"]
+  distance_thresh: 10.0
+  vis_sigma: 4.0
+
+output:
+  base_dir: "./logsSave"
+  save_visualization: true
+  split_tag: "test"  # 用于输出目录标识

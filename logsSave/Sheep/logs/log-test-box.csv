@@ -1,2 +1,1 @@
 image_id,pred_count,gt_count,count_abs_err,count_rel_err,f1,precision,recall,prompt_k
-00886.png,92,603,511,0.847430,0.155396,0.586957,0.089552,3

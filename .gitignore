@@ -28,3 +28,27 @@ build/
 
 # 输出与可视化结果（不上传）
 logsSave/
+tmp/
+
+# Model checkpoints / weights
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.onnx
+*.engine
+*.trt
+*.safetensors
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.pkl
+*.pickle
+
+# OS junk
+.DS_Store
+Thumbs.db
